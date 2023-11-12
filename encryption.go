@@ -54,8 +54,11 @@ When using Encryption, there are three options available
 
 	uses the most excellent NTLM library from https://github.com/bodgit/ntlmssp
 */
-func NewEncryption(protocol string) (*Encryption, error) {
+func NewEncryption(protocol string, username string, password string, endpoint *winrm.Endpoint) (*Encryption, error) {
 	encryption := &Encryption{
+		username: username,
+		password: password,
+		endpoint: endpoint,
 		ntlm:     &winrm.ClientNTLM{},
 		protocol: protocol,
 	}
