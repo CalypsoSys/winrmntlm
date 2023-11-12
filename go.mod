@@ -1,4 +1,4 @@
-module winrmntlm
+module github.com/CalypsoSys/winrmntlm
 
 go 1.18
 
