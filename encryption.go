@@ -13,11 +13,15 @@ import (
 
 	"github.com/bodgit/ntlmssp"
 	ntlmhttp "github.com/bodgit/ntlmssp/http"
+	"github.com/masterzen/winrm"
 	"github.com/masterzen/winrm/soap"
 )
 
 type Encryption struct {
-	ntlm           *ClientNTLM
+	username       string
+	password       string
+	endpoint       *winrm.Endpoint
+	ntlm           *winrm.ClientNTLM
 	protocol       string
 	protocolString []byte
 	httpClient     *http.Client
@@ -52,7 +56,7 @@ When using Encryption, there are three options available
 */
 func NewEncryption(protocol string) (*Encryption, error) {
 	encryption := &Encryption{
-		ntlm:     &ClientNTLM{},
+		ntlm:     &winrm.ClientNTLM{},
 		protocol: protocol,
 	}
 
@@ -71,37 +75,48 @@ func NewEncryption(protocol string) (*Encryption, error) {
 	return nil, fmt.Errorf("Encryption for protocol '%s' not supported in winrm", protocol)
 }
 
-func (e *Encryption) Transport(endpoint *Endpoint) error {
+func (e *Encryption) Transport(endpoint *winrm.Endpoint) error {
 	e.httpClient = &http.Client{}
 	return e.ntlm.Transport(endpoint)
 }
 
-func (e *Encryption) Post(client *Client, message *soap.SoapMessage) (string, error) {
+func (e *Encryption) Post(client *winrm.Client, message *soap.SoapMessage) (string, error) {
 	var userName, domain string
-	if strings.Contains(client.username, "@") {
-		parts := strings.Split(client.username, "@")
+	if strings.Contains(e.username, "@") {
+		parts := strings.Split(e.username, "@")
 		domain = parts[1]
 		userName = parts[0]
-	} else if strings.Contains(client.username, "\\") {
-		parts := strings.Split(client.username, "\\")
+	} else if strings.Contains(e.username, "\\") {
+		parts := strings.Split(e.username, "\\")
 		domain = parts[0]
 		userName = parts[1]
 	} else {
-		userName = client.username
+		userName = e.username
 	}
 
-	e.ntlmClient, _ = ntlmssp.NewClient(ntlmssp.SetUserInfo(userName, client.password), ntlmssp.SetDomain(domain), ntlmssp.SetVersion(ntlmssp.DefaultVersion()))
+	e.ntlmClient, _ = ntlmssp.NewClient(ntlmssp.SetUserInfo(userName, e.password), ntlmssp.SetDomain(domain), ntlmssp.SetVersion(ntlmssp.DefaultVersion()))
 	e.ntlmhttp, _ = ntlmhttp.NewClient(e.httpClient, e.ntlmClient)
 
 	var err error
-	if err = e.PrepareRequest(client, client.url); err == nil {
-		return e.PrepareEncryptedRequest(client, client.url, []byte(message.String()))
+	if err = e.PrepareRequest(client, e.url()); err == nil {
+		return e.PrepareEncryptedRequest(client, e.url(), []byte(message.String()))
 	} else {
 		return e.ntlm.Post(client, message)
 	}
 }
 
-func (e *Encryption) PrepareRequest(client *Client, endpoint string) error {
+func (e *Encryption) url() string {
+	var scheme string
+	if e.endpoint.HTTPS {
+		scheme = "https"
+	} else {
+		scheme = "http"
+	}
+
+	return fmt.Sprintf("%s://%s:%d/wsman", scheme, e.endpoint.Host, e.endpoint.Port)
+}
+
+func (e *Encryption) PrepareRequest(client *winrm.Client, endpoint string) error {
 	req, err := http.NewRequest("POST", endpoint, nil)
 	if err != nil {
 		return err
@@ -132,7 +147,7 @@ and correct headers
 :param message: The unencrypted message to send to the server
 :return: A prepared request that has an decrypted message
 */
-func (e *Encryption) PrepareEncryptedRequest(client *Client, endpoint string, message []byte) (string, error) {
+func (e *Encryption) PrepareEncryptedRequest(client *winrm.Client, endpoint string, message []byte) (string, error) {
 	url, err := url.Parse(endpoint)
 	if err != nil {
 		return "", err
